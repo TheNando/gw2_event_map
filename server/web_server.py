@@ -51,6 +51,50 @@ def continent_coords(continent_rect, map_rect, point):
         (-p1 - m01) / (m11 - m01) * (c11 - c01) + c01)
 
 
+class Place(object):
+
+    def __init__(self, name, place_id):
+        self.id = name
+        self.name = place_id
+
+
+class Vector3(object):
+    def __init__(self, x, y, z):
+        self.x = x
+        self.y = y
+        self.z = z
+
+
+class Player(object):
+
+    def __init__(self, raw):
+
+        map_id = raw.context[7]
+        identity = json.loads(raw.identity)
+        fp = get(_MAP_INFO_URL.format(map_id))
+        map_data = json.loads(fp.text)['maps'][str(map_id)]
+        fp.close()
+
+        self.name = identity['name']
+        self.map = Place(map_data['map_name'], map_id)
+        self.region = Place(map_data['region_name'], map_data['region_id'])
+        self.continent = Place(map_data['continent_name'],
+                               map_data['continent_id'])
+        self.server = Place("", identity['world_id'])
+
+        # TODO: Set position and camera
+        self.position = Vector3(0, 0, 0)
+        self.camera = Vector3(0, 0, 0)
+
+        dir_x = raw.fAvatarFront[0]
+        dir_z = raw.fAvatarFront[2]
+        self.direction = -(atan2(dir_z, dir_x) * 180 / pi) % 360
+
+    # TODO: Update position method
+    def update_position(self, pos):
+        pass
+
+
 class Notifier(Thread):
     def __init__(self):
         Thread.__init__(self)
@@ -64,40 +108,46 @@ class Notifier(Thread):
         self.clients.remove(client)
 
     def run(self, ):
-        map_id = 0
-        map_data = None
-        identity = None
+        player = None
+        map_id = None
 
         memfile = mmap(0, ctypes.sizeof(Link), "MumbleLink")
 
-        while True:
+        while _NOTIFIER.running:
             memfile.seek(0)
             data = memfile.read(ctypes.sizeof(Link))
             result = unpack(Link, data)
 
             # Map change
             if result.context[7] != map_id:
-                identity = json.loads(result.identity)
-                map_id = result.context[7]
-                fp = get(_MAP_INFO_URL.format(map_id))
-                map_data = json.loads(fp.text)['maps'][str(map_id)]
-                fp.close()
-                map_data['world_id'] = identity['world_id']
-                map_data['map_id'] = map_id
-                identity.pop('world_id')
-                identity.pop('map_id')
+                player = Player(result)
+                # identity = json.loads(result.identity)
+                # map_id = result.context[7]
+                # fp = get(_MAP_INFO_URL.format(map_id))
+                # map_data = json.loads(fp.text)['maps'][str(map_id)]
+                # fp.close()
+                # map_data['world_id'] = identity['world_id']
+                # map_data['map_id'] = map_id
+                # identity.pop('world_id')
+                # identity.pop('map_id')
 
-            data = {
-                'identity': identity,
-                'location': map_data,
-                'face': -(atan2(result.fAvatarFront[2], result.fAvatarFront[0])*180/pi)%360
-            }
+            # data = {
+            #     'identity': identity,
+            #     'location': map_data,
+            #     'face': -(atan2(result.fAvatarFront[2], result.fAvatarFront[0])*180/pi)%360
+            # }
 
+            # TODO: New way to determine if position was updated
+            map_data = {}
             if map_data:
-                data.update({
-                    'position': continent_coords(map_data['continent_rect'], map_data['map_rect'], (result.fAvatarPosition[0]*_MULTIPLIER, result.fAvatarPosition[2]*_MULTIPLIER))})
+                player.update_position(
+                    continent_coords(
+                        map_data['continent_rect'],
+                        map_data['map_rect'],
+                        (result.fAvatarPosition[0]*_MULTIPLIER,
+                         result.fAvatarPosition[2]*_MULTIPLIER)))
 
-            output = json.dumps(data)
+            output = json.dumps(player.__dict__)
 
             for client in self.clients:
                 try:
@@ -125,7 +175,6 @@ application = web.Application([
 if __name__ == "__main__":
     _NOTIFIER = Notifier()
     _NOTIFIER.start()
-    http_server = httpserver.HTTPServer(application)
-    http_server.listen(8888)
+    httpserver.HTTPServer(application).listen(80)
     ioloop.IOLoop.instance().start()
     _NOTIFIER.running = False
