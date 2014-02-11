@@ -6,19 +6,16 @@ from threading import Thread
 from time import sleep
 
 import ctypes
-
-try: import simplejson as json
-except ImportError: import json
-
-# http://www.tornadoweb.org/en/stable/
-import tornado.httpserver
-import tornado.websocket
-import tornado.ioloop
-import tornado.web
+import simplejson as json
+from tornado import httpserver
+from tornado import websocket
+from tornado import ioloop
+from tornado import web
 
 _MULTIPLIER = 39.3701
 _MAP_INFO_URL = "https://api.guildwars2.com/v1/maps.json?map_id={0}"
 _NOTIFIER = None
+
 
 class Link(ctypes.Structure):
     _fields_ = [
@@ -33,21 +30,26 @@ class Link(ctypes.Structure):
         ("fCameraTop",      ctypes.c_float * 3),
         ("identity",        ctypes.c_wchar * 256),
         ("context_len",     ctypes.c_uint32),
-        ("context",         ctypes.c_uint32 * int(256/4)), # is actually 256 bytes of whatever
-        ("description",     ctypes.c_wchar * 2048)
+        ("context",         ctypes.c_uint32 * int(256/4)),
+        ("description",     ctypes.c_wchar * 2048)]
 
-    ]
 
 def unpack(ctype, buf):
     cstring = ctypes.create_string_buffer(buf)
-    ctype_instance = ctypes.cast(ctypes.pointer(cstring), ctypes.POINTER(ctype)).contents
-    return ctype_instance
+    return ctypes.cast(ctypes.pointer(cstring), ctypes.POINTER(ctype)).contents
+
 
 def continent_coords(continent_rect, map_rect, point):
+    p0, p1 = point[0], point[1]
+    m00, m01 = map_rect[0][0], map_rect[0][1]
+    m10, m11 = map_rect[1][0], map_rect[1][1]
+    c00, c01 = continent_rect[0][0], continent_rect[0][1]
+    c10, c11 = continent_rect[1][0], continent_rect[1][1]
+
     return (
-        ( point[0]-map_rect[0][0])/(map_rect[1][0]-map_rect[0][0])*(continent_rect[1][0]-continent_rect[0][0])+continent_rect[0][0],
-        (-point[1]-map_rect[0][1])/(map_rect[1][1]-map_rect[0][1])*(continent_rect[1][1]-continent_rect[0][1])+continent_rect[0][1]
-    )
+        (p0 - m00) / (m10 - m00) * (c10 - c00) + c00,
+        (-p1 - m01) / (m11 - m01) * (c11 - c01) + c01)
+
 
 class Notifier(Thread):
     def __init__(self):
@@ -62,8 +64,8 @@ class Notifier(Thread):
         self.clients.remove(client)
 
     def run(self, ):
-        current_map_id = 0
-        current_map_data = None
+        map_id = 0
+        map_data = None
         identity = None
 
         memfile = mmap(0, ctypes.sizeof(Link), "MumbleLink")
@@ -74,25 +76,26 @@ class Notifier(Thread):
             result = unpack(Link, data)
 
             # Map change
-            if result.context[7] != current_map_id:
+            if result.context[7] != map_id:
                 identity = json.loads(result.identity)
-                current_map_id = result.context[7]
-                fp = get(_MAP_INFO_URL.format(current_map_id))
-                current_map_data = json.loads(fp.text)['maps'][str(current_map_id)]
+                map_id = result.context[7]
+                fp = get(_MAP_INFO_URL.format(map_id))
+                map_data = json.loads(fp.text)['maps'][str(map_id)]
                 fp.close()
-                current_map_data['world_id'] = identity['world_id']
-                current_map_data['map_id'] = current_map_id
+                map_data['world_id'] = identity['world_id']
+                map_data['map_id'] = map_id
                 identity.pop('world_id')
                 identity.pop('map_id')
 
             data = {
                 'identity': identity,
-                'location': current_map_data,
+                'location': map_data,
                 'face': -(atan2(result.fAvatarFront[2], result.fAvatarFront[0])*180/pi)%360
             }
 
-            if current_map_data:
-                data.update({'position': continent_coords(current_map_data['continent_rect'], current_map_data['map_rect'], (result.fAvatarPosition[0]*_MULTIPLIER, result.fAvatarPosition[2]*_MULTIPLIER))})
+            if map_data:
+                data.update({
+                    'position': continent_coords(map_data['continent_rect'], map_data['map_rect'], (result.fAvatarPosition[0]*_MULTIPLIER, result.fAvatarPosition[2]*_MULTIPLIER))})
 
             output = json.dumps(data)
 
@@ -103,7 +106,8 @@ class Notifier(Thread):
                     print(e)
             sleep(0.1)
 
-class WSHandler(tornado.websocket.WebSocketHandler):
+
+class WSHandler(websocket.WebSocketHandler):
     def open(self):
         # New connection
         _NOTIFIER.register(self)
@@ -113,7 +117,7 @@ class WSHandler(tornado.websocket.WebSocketHandler):
         _NOTIFIER.unregister(self)
 
 
-application = tornado.web.Application([
+application = web.Application([
     (r'/ws', WSHandler),
 ])
 
@@ -121,7 +125,7 @@ application = tornado.web.Application([
 if __name__ == "__main__":
     _NOTIFIER = Notifier()
     _NOTIFIER.start()
-    http_server = tornado.httpserver.HTTPServer(application)
+    http_server = httpserver.HTTPServer(application)
     http_server.listen(8888)
-    tornado.ioloop.IOLoop.instance().start()
-    _NOTIFIER.running = False # As if
+    ioloop.IOLoop.instance().start()
+    _NOTIFIER.running = False
