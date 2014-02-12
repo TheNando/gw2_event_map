@@ -39,60 +39,110 @@ def unpack(ctype, buf):
     return ctypes.cast(ctypes.pointer(cstring), ctypes.POINTER(ctype)).contents
 
 
-def continent_coords(continent_rect, map_rect, point):
-    p0, p1 = point[0], point[1]
-    m00, m01 = map_rect[0][0], map_rect[0][1]
-    m10, m11 = map_rect[1][0], map_rect[1][1]
-    c00, c01 = continent_rect[0][0], continent_rect[0][1]
-    c10, c11 = continent_rect[1][0], continent_rect[1][1]
-
-    return (
-        (p0 - m00) / (m10 - m00) * (c10 - c00) + c00,
-        (-p1 - m01) / (m11 - m01) * (c11 - c01) + c01)
-
-
 class Place(object):
 
-    def __init__(self, name, place_id):
-        self.id = name
-        self.name = place_id
+    def __init__(self, name, place_id, rect=None):
+        self.id = place_id
+        self.name = name
+        self.rect = rect and Rect.from_list(rect) or None
+
+    @property
+    def dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'rect': self.rect and self.rect.__dict__ or None}
 
 
-class Vector3(object):
+class Point(object):
+
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    @classmethod
+    def from_list(cls, vec):
+        return cls(vec[0], vec[1])
+
+    def equals(self, point):
+        return self.x == point.x and self.y == point.y
+
+
+class Point3D(object):
+
     def __init__(self, x, y, z):
         self.x = x
         self.y = y
         self.z = z
 
+    @classmethod
+    def from_list(cls, vec):
+        return cls(vec[0], vec[1], vec[2])
+
+    def equals(self, vec):
+        return self.x == vec[0] and self.y == vec[1] and self.z == vec[2]
+
+
+class Rect(object):
+
+    def __init__(self, top, left, width, height):
+        self.top = top
+        self.left = left
+        self.width = width
+        self.height = height
+
+    @classmethod
+    def from_list(cls, rect):
+        return cls(
+            rect[0][0], rect[0][1],
+            rect[1][0] - rect[0][0], rect[1][1] - rect[0][1])
+
+    def project(self, rect, point):
+        return Point(
+            (point.x - rect.top) / rect.width * self.width + self.top,
+            (-point.y - rect.left) / rect.height * self.height + self.left)
+
 
 class Player(object):
 
     def __init__(self, raw):
-
         map_id = raw.context[7]
-        identity = json.loads(raw.identity)
         fp = get(_MAP_INFO_URL.format(map_id))
         map_data = json.loads(fp.text)['maps'][str(map_id)]
+        identity = json.loads(raw.identity)
         fp.close()
 
         self.name = identity['name']
-        self.map = Place(map_data['map_name'], map_id)
+        self.map = Place(map_data['map_name'], map_id, map_data['map_rect'])
         self.region = Place(map_data['region_name'], map_data['region_id'])
         self.continent = Place(map_data['continent_name'],
-                               map_data['continent_id'])
-        self.server = Place("", identity['world_id'])
+                               map_data['continent_id'],
+                               map_data['continent_rect'])
+        self.server = Place(None, identity['world_id'])
+        self.position_raw = Point3D.from_list(raw.fAvatarPosition)
+        self.position = None
+        self.direction = None
+        self.update_position(raw.fAvatarPosition, raw.fAvatarFront)
+        # self.direction = -(atan2(dir_z, dir_x) * 180 / pi) % 360
 
-        # TODO: Set position and camera
-        self.position = Vector3(0, 0, 0)
-        self.camera = Vector3(0, 0, 0)
-
-        dir_x = raw.fAvatarFront[0]
-        dir_z = raw.fAvatarFront[2]
+    def update_position(self, position, direction):
+        dir_x = direction[0]
+        dir_z = direction[2]
+        pos = Point(position[0] * _MULTIPLIER, position[2] * _MULTIPLIER)
+        self.position = self.continent.rect.project(self.map.rect, pos)
         self.direction = -(atan2(dir_z, dir_x) * 180 / pi) % 360
+        self.position_raw = Point3D.from_list(position)
 
-    # TODO: Update position method
-    def update_position(self, pos):
-        pass
+    @property
+    def json(self):
+        return json.dumps({
+            'name': self.name,
+            'map': self.map.dict,
+            'region': self.region.dict,
+            'continent': self.continent.dict,
+            'server': self.server.dict,
+            'position': self.position.__dict__,
+            'direction': self.direction})
 
 
 class Notifier(Thread):
@@ -109,45 +159,22 @@ class Notifier(Thread):
 
     def run(self, ):
         player = None
-        map_id = None
-
         memfile = mmap(0, ctypes.sizeof(Link), "MumbleLink")
 
         while _NOTIFIER.running:
             memfile.seek(0)
-            data = memfile.read(ctypes.sizeof(Link))
-            result = unpack(Link, data)
+            data = unpack(Link, memfile.read(ctypes.sizeof(Link)))
 
-            # Map change
-            if result.context[7] != map_id:
-                player = Player(result)
-                # identity = json.loads(result.identity)
-                # map_id = result.context[7]
-                # fp = get(_MAP_INFO_URL.format(map_id))
-                # map_data = json.loads(fp.text)['maps'][str(map_id)]
-                # fp.close()
-                # map_data['world_id'] = identity['world_id']
-                # map_data['map_id'] = map_id
-                # identity.pop('world_id')
-                # identity.pop('map_id')
+            # Player instantiation or Map change
+            if not player or player.map.id != data.context[7]:
+                player = Player(data)
+                print("Player Updated")
 
-            # data = {
-            #     'identity': identity,
-            #     'location': map_data,
-            #     'face': -(atan2(result.fAvatarFront[2], result.fAvatarFront[0])*180/pi)%360
-            # }
+            if not player.position_raw.equals(data.fAvatarPosition):
+                player.update_position(data.fAvatarPosition, data.fAvatarFront)
+                print("Position Updated")
 
-            # TODO: New way to determine if position was updated
-            map_data = {}
-            if map_data:
-                player.update_position(
-                    continent_coords(
-                        map_data['continent_rect'],
-                        map_data['map_rect'],
-                        (result.fAvatarPosition[0]*_MULTIPLIER,
-                         result.fAvatarPosition[2]*_MULTIPLIER)))
-
-            output = json.dumps(player.__dict__)
+            output = player.json
 
             for client in self.clients:
                 try:
@@ -160,10 +187,12 @@ class Notifier(Thread):
 class WSHandler(websocket.WebSocketHandler):
     def open(self):
         # New connection
+        print("Player Connected")
         _NOTIFIER.register(self)
 
     def on_close(self):
         # Connection closed
+        print("Player Disconnected")
         _NOTIFIER.unregister(self)
 
 
@@ -175,6 +204,6 @@ application = web.Application([
 if __name__ == "__main__":
     _NOTIFIER = Notifier()
     _NOTIFIER.start()
-    httpserver.HTTPServer(application).listen(80)
+    httpserver.HTTPServer(application).listen(8080)
     ioloop.IOLoop.instance().start()
     _NOTIFIER.running = False

@@ -10,7 +10,7 @@
         <link rel="stylesheet" href="style.css" />
         <script>
             var map,
-                current_location,
+                player,
                 supermarker,
                 marker_layer,
                 event_filter = "Active",
@@ -33,8 +33,8 @@
                     if (marker_layer)
                         marker_layer.clearLayers();
 
-                    region = data.regions[current_location.region_id];
-                    gameMap = region.maps[current_location.map_id];
+                    region = data.regions[player.region.id];
+                    gameMap = region.maps[player.map.id];
 
                     for (i = 0, il = gameMap.points_of_interest.length; i < il; i++) {
                         poi = gameMap.points_of_interest[i];
@@ -69,8 +69,8 @@
 
             function loadEvents(type) {
                 var event_url = EVENTS_URL
-                    .replace("{world}", current_location.world_id)
-                    .replace("{map}", current_location.map_id);
+                    .replace("{world}", player.server.id)
+                    .replace("{map}", player.map.id);
                 $.getJSON(event_url, function (data) {
                     // Filter out completed states
                     states = ["Warmup", "Preparation", "Active"];
@@ -158,7 +158,7 @@
             $(document).ready(function () {
                 var ws;
                 var host = "localhost";
-                var port = "8888";
+                var port = "8080";
                 var uri = "/ws";
                 var pos, oldPos;
 
@@ -170,8 +170,8 @@
                         pos = unproject(json.position);
 
                         // On first run or new map
-                        if (!current_location || current_location.map_id !== json.location.map_id) {
-                            current_location = json.location;
+                        if (!player || player.map.id !== json.map.id) {
+                            player = json;
                             loadMapPoints();
                             loadEvents(event_filter);
                             map.setView(pos, map.getZoom() | 7);
@@ -185,14 +185,15 @@
                                 map.setView(pos, map.getZoom());
 
                             if ("_icon" in supermarker)
-                                supermarker._icon.title = json.identity.name;
+                                supermarker._icon.title = player.name;
 
                             supermarker.update();
                             oldPos = pos;
                             scale = 1 - 0.05 * (7 - map.getZoom());
 
+                            console.log(player.direction)
                             $('.fancyPlayerPos img').css({
-                                transform: 'scale(' + scale + ',' + scale + ') rotate(' + json.face + 'deg)'
+                                transform: 'scale(' + scale + ',' + scale + ') rotate(' + json.direction + 'deg)'
                             });
                         }
                     }
