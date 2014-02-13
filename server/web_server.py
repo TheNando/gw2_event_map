@@ -165,6 +165,10 @@ class Notifier(Thread):
             memfile.seek(0)
             data = unpack(Link, memfile.read(ctypes.sizeof(Link)))
 
+            if data.context_len == 0:
+                sleep(2)
+                continue
+
             # Player instantiation or Map change
             if not player or player.map.id != data.context[7]:
                 player = Player(data)

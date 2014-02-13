@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Guild Wars 2 Dynamic Map</title>
+        <meta charset="utf-8" />
+        <script src="http://code.jquery.com/jquery.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.5.1/leaflet.js"></script>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.5.1/leaflet.css" />
+        <link rel="stylesheet" href="https://d1h9a8s8eodvjz.cloudfront.net/fonts/menomonia/08-02-12/menomonia.css" />
+        <link rel="stylesheet" href="css/style.css" />
+        <script>
+            var map,
+                player,
+                supermarker,
+                marker_layer,
+                event_filter = "Active",
+                resources = {},
+                MAP_TILES_URL = "https://tiles.guildwars2.com/1/1/{z}/{x}/{y}.jpg",
+                MAP_FLOOR_URL = "https://api.guildwars2.com/v1/map_floor.json?continent_id=1&floor=1",
+                EVENTS_URL = "https://api.guildwars2.com/v1/events.json?world_id={world}&map_id={map}",
+                EVENT_DETAILS_URL = "https://api.guildwars2.com/v1/event_details.json?event_id={event_id}"
+                FILES_URL = "https://api.guildwars2.com/v1/files.json",
+                IMAGES_URL = "https://render.guildwars2.com/file/{signature}/{file_id}.png";
+
+            function unproject(coord) {
+                return map.unproject(coord, map.getMaxZoom());
+            }
+
+            function loadMapPoints() {
+                $.getJSON(MAP_FLOOR_URL, function (data) {
+                    var region, gameMap, i, il, poi, iconUrl, markers = [];
+
+                    if (marker_layer)
+                        marker_layer.clearLayers();
+
+                    region = data.regions[player.region.id];
+                    gameMap = region.maps[player.map.id];
+
+                    for (i = 0, il = gameMap.points_of_interest.length; i < il; i++) {
+                        poi = gameMap.points_of_interest[i];
+
+                        switch (poi.type) {
+                            case "waypoint":
+                                iconUrl = resources.map_waypoint;
+                                break;
+                            case "landmark":
+                                iconUrl = resources.map_poi;
+                                break;
+                            case "vista":
+                                iconUrl = "icons/vista.png"
+                                break;
+                            case "default":
+                                alert("POI Type Doesn't Exist");
+                        }
+
+                        markers.push(L.marker(unproject(poi.coord), {
+                            icon: L.icon({
+                                iconUrl: iconUrl,
+                                iconSize: [40, 40],
+                                iconAnchor: [20, 20]
+                            }),
+                            title: poi.name
+                        }));
+                        marker_layer = L.layerGroup(markers);
+                        marker_layer.addTo(map);
+                    }
+                });
+            }
+
+            function loadEvents(type) {
+                var event_url = EVENTS_URL
+                    .replace("{world}", player.server.id)
+                    .replace("{map}", player.map.id);
+                $.getJSON(event_url, function (data) {
+                    // Filter out completed states
+                    states = ["Warmup", "Preparation", "Active"];
+                    $('#event-list').empty();
+                    $('.event-buttons span').removeClass('selected');
+                    $('.event-buttons span#' + type.toLowerCase()).addClass('selected');
+
+                    data.events.forEach(function(evt) {
+                        if (evt.state !== type)
+                            return;
+
+                        var event_details_url = EVENT_DETAILS_URL.replace("{event_id}", evt.event_id);
+                        $.getJSON(event_details_url, function (data) {
+                            var e = data.events[evt.event_id];
+                            var div = $("<div>", {class: "event " + evt.state.toLowerCase()});
+                            div.html(e.name);
+                            div.append("<span class='level'>(" + e.level + ")</span>");
+                            div.append("<div class='clear'>");
+                            $('#event-list').append(div);
+                        })
+                    });
+
+                    // markers.push(L.marker(unproject(poi.coord), {
+                    //     icon: L.icon({
+                    //         iconUrl: iconUrl,
+                    //         iconSize: [40, 40],
+                    //         iconAnchor: [20, 20]
+                    //     }),
+                    //     title: poi.name
+                    // }));
+                    // marker_layer = L.layerGroup(markers);
+                    // marker_layer.addTo(map);
+                });
+            }
+
+            // Initialization
+            $(function () {
+                "use strict";
+
+                // Load resource urls
+                $.getJSON(FILES_URL, function (data) {
+                    var item;
+                    for (item in data) {
+                        resources[item] = IMAGES_URL
+                            .replace("{signature}", data[item].signature)
+                            .replace("{file_id}", data[item].file_id);
+                    }
+                });
+
+                $('.event-buttons span').click(function(evt) {
+                    event_filter = evt.currentTarget.textContent;
+                    loadEvents(event_filter)
+                });
+
+                // Setup map
+                map = L.map("map", {
+                    minZoom: 3,
+                    maxZoom: 7,
+                    crs: L.CRS.Simple
+                });
+
+                var southWest = unproject([0, 32768]),
+                    northEast = unproject([32768, 0]);
+
+                map.setMaxBounds(new L.LatLngBounds(southWest, northEast));
+
+                // Setup tiles
+                L.tileLayer(MAP_TILES_URL, {
+                    minZoom: 3,
+                    maxZoom: 7,
+                    continuousWorld: true
+                }).addTo(map);
+
+                // Place player marker
+                supermarker = L.marker(unproject([0, 0]), {
+                    icon: L.divIcon({
+                        iconSize: [48, 48],
+                        iconAnchor: [24, 24],
+                        className: 'fancyPlayerPos',
+                        html: '<img src="icons/position.png">'
+                    })
+                }).addTo(map);
+            });
+
+            $(document).ready(function () {
+                var ws;
+                var host = "localhost";
+                var port = "8080";
+                var uri = "/ws";
+                var pos, oldPos;
+
+                ws = new WebSocket("ws://" + host + ":" + port + uri);
+
+                ws.onmessage = function (evt) {
+                    var json = $.parseJSON(evt.data);
+                    if (json.position) {
+                        pos = unproject(json.position);
+
+                        // On first run or new map
+                        if (!player || player.map.id !== json.map.id) {
+                            player = json;
+                            loadMapPoints();
+                            loadEvents(event_filter);
+                            map.setView(pos, map.getZoom() | 7);
+                            supermarker.setZIndexOffset(1000)
+                        }
+
+                        if (!pos.equals(oldPos)) {
+                            supermarker.setLatLng(pos);
+
+                            if (!map.getBounds().pad(-0.2).contains(pos))
+                                map.setView(pos, map.getZoom());
+
+                            if ("_icon" in supermarker)
+                                supermarker._icon.title = player.name;
+
+                            supermarker.update();
+                            oldPos = pos;
+                            scale = 1 - 0.05 * (7 - map.getZoom());
+
+                            console.log(player.direction)
+                            $('.fancyPlayerPos img').css({
+                                transform: 'scale(' + scale + ',' + scale + ') rotate(' + json.direction + 'deg)'
+                            });
+                        }
+                    }
+                };
+
+                ws.onclose = function (evt) {
+                    console.log("Connection close");
+                };
+
+                ws.onopen = function (evt) {
+                    console.log("Connection open");
+                };
+            });
+        </script>
+    </head>
+    <body>
+        <div id="events">
+            <div class="event-buttons">
+                <span id="active">Active</span>
+                <span id="preparation">Preparation</span>
+            </div>
+            <div id="event-list"></div>
+        </div>
+        <div id="map"></div>
+    </body>
+</html>
