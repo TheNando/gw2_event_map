@@ -113,6 +113,8 @@ class Player(object):
         fp.close()
 
         self.name = identity['name']
+        self.moving = False
+        self.updated = False
         self.map = Place(map_data['map_name'], map_id, map_data['map_rect'])
         self.region = Place(map_data['region_name'], map_data['region_id'])
         self.continent = Place(map_data['continent_name'],
@@ -125,6 +127,10 @@ class Player(object):
         self.update_position(raw.fAvatarPosition, raw.fAvatarFront)
         # self.direction = -(atan2(dir_z, dir_x) * 180 / pi) % 360
 
+    def reset(self):
+        self.moving = False
+        self.updated = False
+
     def update_position(self, position, direction):
         dir_x = direction[0]
         dir_z = direction[2]
@@ -132,11 +138,15 @@ class Player(object):
         self.position = self.continent.rect.project(self.map.rect, pos)
         self.direction = -(atan2(dir_z, dir_x) * 180 / pi) % 360
         self.position_raw = Point3D.from_list(position)
+        self.moving = True
+        self.updated = True
 
     @property
     def json(self):
         return json.dumps({
             'name': self.name,
+            'moving': self.moving,
+            'updated': self.updated,
             'map': self.map.dict,
             'region': self.region.dict,
             'continent': self.continent.dict,
@@ -150,8 +160,10 @@ class Notifier(Thread):
         Thread.__init__(self)
         self.clients = set()
         self.running = True
+        self.force_update = False
 
     def register(self, client):
+        self.force_update = True
         self.clients.add(client)
 
     def unregister(self, client):
@@ -161,30 +173,36 @@ class Notifier(Thread):
         player = None
         memfile = mmap(0, ctypes.sizeof(Link), "MumbleLink")
 
+        # Only check if people are connected
         while _NOTIFIER.running:
             memfile.seek(0)
             data = unpack(Link, memfile.read(ctypes.sizeof(Link)))
 
-            if data.context_len == 0:
+            # Sleep until memory file read
+            if data.context_len == 0 or not self.clients:
                 sleep(2)
                 continue
 
             # Player instantiation or Map change
             if not player or player.map.id != data.context[7]:
                 player = Player(data)
+                player.updated = True
                 print("Player Updated")
 
-            if not player.position_raw.equals(data.fAvatarPosition):
+            # Player movement
+            elif not player.position_raw.equals(data.fAvatarPosition):
                 player.update_position(data.fAvatarPosition, data.fAvatarFront)
                 print("Position Updated")
 
-            output = player.json
-
-            for client in self.clients:
-                try:
-                    client.write_message(output)
-                except Exception as e:
-                    print(e)
+            # Only send if there is an update to send
+            if player.updated or self.force_update:
+                for client in self.clients:
+                    try:
+                        client.write_message(player.json)
+                        player.reset()
+                        self.force_update = False
+                    except Exception as e:
+                        print(e)
             sleep(0.1)
 
 

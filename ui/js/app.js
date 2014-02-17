@@ -39,54 +39,105 @@ var errorCallBack = function (arg1, arg2, arg3) {
     alert(arg1);
 };
 
+
+function MapManager(options, tiles) {
+    // Setup map
+    map = L.map("map", {
+        minZoom: options.defaults.minZoom,
+        maxZoom: options.defaults.maxZoom,
+        center: L.latLng(options.center.lat, options.center.lng),
+        layers: [L.tileLayer(MAP_TILES_URL,
+            {
+                minZoom: options.defaults.minZoom,
+                maxZoom: options.defaults.maxZoom,
+                maxNativeZoom: options.defaults.maxZoom + 2,
+                continuousWorld: true
+            }]
+})]
+        //crs: L.CRS.Simple
+    });
+}
+
+
 ///////////////
 // Controllers
 ///////////////
 
 app.controller('MapCtrl', ['$scope', 'leafletData', 'leafletBoundsHelpers',
 function ($scope, leafletData, leafletBoundsHelpers) {
-    var map;
-    var layer;
-    var player;
 
-    $scope.markers = new Array();
-
-    // Create map
-    angular.extend($scope, {
+    var map = new MapManager({
         defaults: {
             minZoom: 3,
-            maxZoom: 7
+            maxZoom: 8,
+            zoom: 0
         },
         center: {
             lat: 0,
-            lng: 0,
-            zoom: 7
+            lng: 0
         },
         tiles: {
             url: MAP_TILES_URL
         }
     });
 
-    // Place player marker
-    $scope.markers = {
-        player: {
-            lat: 0,
-            lng: 0,
-            draggable: false,
-            icon: {
-                iconSize: [48, 48],
-                iconAnchor: [24, 24],
-                className: 'fancyPlayerPos',
-                html: '<img src="media/position.png">'
-            }
-        }
-    };
+    var player;
+    var playerMarker;
+    var MAX_ZOOM;
 
-    function unproject(coord) {
-        return map.unproject([coord.x, coord.y], map.getMaxZoom());
+    function unproject (coord) {
+        return map.unproject([coord.x, coord.y], MAX_ZOOM);
     }
 
-    $scope.initialize = function() {
+    function updatePlayerMarker (pos, dir) {
+        if ('player' in $scope.markers) {
+            $scope.markers.player.lat = pos.lat;
+            $scope.markers.player.lng = pos.lng;
+        } else {
+            $scope.markers = {
+                player: {
+                    lat: pos.lat, lng: pos.lng,
+                    draggable: false,
+                    icon: {
+                        type: 'div',
+                        iconSize: [48, 48],
+                        iconAnchor: [24, 24],
+                        className: 'markerPlayer',
+                        html: '<img src="media/position.png">'
+                    }
+                }
+            };
+        }
+
+        //var scale = 1 - 0.05 * (7 - map.getZoom());
+        var scale = (map.getZoom() + 13) / 20;
+        
+        if (!playerMarker) {
+            leafletData.getMarkers().then(function (marker) {
+                if ('player' in marker)
+                    playerMarker = marker.player._icon;
+            });
+        } else {
+            $('.playerMarker').css({
+                transform: 'scale(' + scale + ',' + scale + ') rotate(' + dir + 'deg)'
+            });
+        }
+
+        // console.log(player.direction)
+        // $('.playerMarker img').css({
+        //     transform: 'scale(' + scale + ',' + scale + ') rotate(' + json.direction + 'deg)'
+        // });
+    }
+
+    function updateCamera (pos, zoom) {
+        $scope.center.lat = pos.lat;
+        $scope.center.lng = pos.lng;
+
+        if (zoom !== 'undefined')
+            $scope.center.zoom = zoom;
+    }
+
+    $scope.initialize = function () {
         var ws;
         var host = "localhost";
         var port = "8080";
@@ -95,27 +146,37 @@ function ($scope, leafletData, leafletBoundsHelpers) {
 
         ws = new WebSocket("ws://" + host + ":" + port + uri);
 
-        // Store map to global var
-        leafletData.getMap().then(function(m) {
-            map = m;
-        });
+        // // Store map to closure scoped var
+        // leafletData.getMap().then(function(m) {
+        //     map = m;
+        //     MAX_ZOOM = map.getMaxZoom();
+        // });
 
         ws.onmessage = function (evt) {
-            var json = $.parseJSON(evt.data);
-            if (json.position) {
-                pos = unproject(json.position);
+            var json = angular.fromJson(evt.data); //$.parseJSON
+            var setCamera = false;
+
+            if (json.updated) {
 
                 // On first run or new map
                 if (!player || player.map.id !== json.map.id) {
                     player = json;
+                    setCamera = true;
+                    // map.setView(pos, map.getZoom());
                     // loadMapPoints();
                     // loadEvents(event_filter);
-                    map.setView(pos, map.getZoom() | 7);
                     // supermarker.setZIndexOffset(1000)
                 }
 
-                // if (!pos.equals(oldPos)) {
-                //     supermarker.setLatLng(pos);
+                if (json.moving) {
+                    pos = unproject(json.position);
+                    updatePlayerMarker(pos, player.direction);
+                }
+
+                if (setCamera)
+                    updateCamera(pos, MAX_ZOOM);
+
+                $scope.$apply();
 
                 //     if (!map.getBounds().pad(-0.2).contains(pos))
                 //         map.setView(pos, map.getZoom());
