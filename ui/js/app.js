@@ -9,84 +9,65 @@ var MAP_TILES_URL = "https://tiles.guildwars2.com/1/1/{z}/{x}/{y}.jpg",
     IMAGES_URL = "https://render.guildwars2.com/file/{signature}/{file_id}.png";
 
 // Module definition
-var app = angular.module('gw2', ['leaflet-directive']); //, 'filters']);
-
-/*
-angular.module('filters', [])
-    .filter('groupBy', [function () {
-        return function (collection, property) {
-
-            if (collection.length === 0)
-                return null;
-
-            var result = {},
-                i = collection.length - 1;
-
-            while (i > -1) {
-                if (!(collection[i][property] in result))
-                    result[collection[i][property]] = [];
-
-                result[collection[i][property]].push(collection[i]);
-                i -= 1;
-            }
-
-            return result;
-        };
-    }]);
-*/
+var app = angular.module('gw2', []);
 
 var errorCallBack = function (arg1, arg2, arg3) {
     alert(arg1);
 };
 
-
-function MapManager(options, tiles) {
-    // Setup map
-    map = L.map("map", {
-        minZoom: options.defaults.minZoom,
-        maxZoom: options.defaults.maxZoom,
-        center: L.latLng(options.center.lat, options.center.lng),
-        layers: [L.tileLayer(MAP_TILES_URL,
-            {
-                minZoom: options.defaults.minZoom,
-                maxZoom: options.defaults.maxZoom,
-                maxNativeZoom: options.defaults.maxZoom + 2,
-                continuousWorld: true
-            }]
-})]
-        //crs: L.CRS.Simple
-    });
-}
-
-
-///////////////
-// Controllers
-///////////////
-
-app.controller('MapCtrl', ['$scope', 'leafletData', 'leafletBoundsHelpers',
-function ($scope, leafletData, leafletBoundsHelpers) {
-
-    var map = new MapManager({
-        defaults: {
-            minZoom: 3,
-            maxZoom: 8,
-            zoom: 0
-        },
-        center: {
-            lat: 0,
-            lng: 0
-        },
-        tiles: {
-            url: MAP_TILES_URL
-        }
-    });
-
+var MapManager = (function () {
+//function MapManager(options, tiles) {
     var player;
     var playerMarker;
-    var MAX_ZOOM;
+    var map;
+
+    function initialize (options) {
+        // map = L.map("map", {
+        //     minZoom: options.defaults.minZoom,
+        //     maxZoom: options.defaults.maxZoom,
+        //     center: L.latLng(options.center.lat, options.center.lng),
+        //     layers: [L.tileLayer(MAP_TILES_URL, {
+        //         minZoom: options.defaults.minZoom,
+        //         maxZoom: options.defaults.maxZoom,
+        //         maxNativeZoom: options.defaults.maxZoom + 2,
+        //         continuousWorld: true })]});
+        // Setup map
+        map = L.map("map", {
+            minZoom: options.zoom.min
+            , maxZoom: options.zoom.max
+            , zoomControl: false
+            , attributionControl: false
+            , center: options.center
+            , zoom: options.zoom.default
+            // , crs: L.CRS.Simple
+        });
+
+        // var southWest = unproject([0, 32768]),
+        //     northEast = unproject([32768, 0]);
+
+        // map.setMaxBounds(new L.LatLngBounds(southWest, northEast));
+
+        // Setup tiles
+        L.tileLayer(MAP_TILES_URL, {
+            minZoom: options.zoom.min
+            , maxZoom: options.zoom.max
+            , continuousWorld: true
+        }).addTo(map);
+
+        //map.setView(options.center, options.zoom.default);
+    }
 
     function unproject (coord) {
-        return map.unproject([coord.x, coord.y], MAX_ZOOM);
+        return map.unproject([coord[0], coord[1]], 7);
+    }
+
+    /*
+    function updateCamera (pos, zoom) {
+        $scope.center.lat = pos.lat;
+        $scope.center.lng = pos.lng;
+
+        if (zoom !== 'undefined')
+            $scope.center.zoom = zoom;
     }
 
     function updatePlayerMarker (pos, dir) {
@@ -103,10 +84,7 @@ function ($scope, leafletData, leafletBoundsHelpers) {
                         iconSize: [48, 48],
                         iconAnchor: [24, 24],
                         className: 'markerPlayer',
-                        html: '<img src="media/position.png">'
-                    }
-                }
-            };
+                        html: '<img src="media/position.png">' }}};
         }
 
         //var scale = 1 - 0.05 * (7 - map.getZoom());
@@ -119,7 +97,9 @@ function ($scope, leafletData, leafletBoundsHelpers) {
             });
         } else {
             $('.playerMarker').css({
-                transform: 'scale(' + scale + ',' + scale + ') rotate(' + dir + 'deg)'
+                transform:
+                    'scale(' + scale + ',' + scale + ') ' +
+                    'rotate(' + dir + 'deg)'
             });
         }
 
@@ -128,32 +108,52 @@ function ($scope, leafletData, leafletBoundsHelpers) {
         //     transform: 'scale(' + scale + ',' + scale + ') rotate(' + json.direction + 'deg)'
         // });
     }
+    */
 
-    function updateCamera (pos, zoom) {
-        $scope.center.lat = pos.lat;
-        $scope.center.lng = pos.lng;
+    return {
+        initialize: initialize
+        // , updateCamera: updateCamera
+        // , updatePlayerMarker: updatePlayerMarker
+    };
+})();
 
-        if (zoom !== 'undefined')
-            $scope.center.zoom = zoom;
-    }
+
+///////////////
+// Controllers
+///////////////
+
+app.controller('MapCtrl', ['$scope', function ($scope) {
+
+    MapManager.initialize({
+        zoom: { min: 3, max: 8, default: 4 },
+        center: { lat: 0, lng: 0 },
+        tiles: { url: MAP_TILES_URL }});    
 
     $scope.initialize = function () {
-        var ws;
-        var host = "localhost";
-        var port = "8080";
-        var uri = "/ws";
-        var pos, oldPos;
+        var host = "localhost",
+            port = "8080",
+            uri = "/ws",
+            ws = new WebSocket("ws://" + host + ":" + port + uri);
 
-        ws = new WebSocket("ws://" + host + ":" + port + uri);
+        /*
+        function firstRun (evt) {
+            var player = angular.fromJson(evt.data);
 
-        // // Store map to closure scoped var
-        // leafletData.getMap().then(function(m) {
-        //     map = m;
-        //     MAX_ZOOM = map.getMaxZoom();
-        // });
+            // map.setView(pos, map.getZoom());
+            // loadMapPoints();
+            // loadEvents(event_filter);
+            // supermarker.setZIndexOffset(1000)
+            updateCamera(pos, MAX_ZOOM);
+            pos = unproject(json.position);
+            updatePlayerMarker(pos, player.direction);
 
-        ws.onmessage = function (evt) {
-            var json = angular.fromJson(evt.data); //$.parseJSON
+            ws.onmessage = processMessage;
+        };
+        */
+
+        /*
+        function processMessage (evt) {
+            var json = angular.fromJson(evt.data);
             var setCamera = false;
 
             if (json.updated) {
@@ -195,6 +195,9 @@ function ($scope, leafletData, leafletBoundsHelpers) {
                 // }
             }
         };
+        */
+
+        // ws.onmessage = firstRun;
 
         ws.onclose = function (evt) {
             console.log("Connection close");
