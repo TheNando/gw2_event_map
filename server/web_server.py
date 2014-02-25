@@ -56,16 +56,16 @@ class Place(object):
 
 class Point(object):
 
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
+    def __init__(self, lng, lat):
+        self.lng = lng
+        self.lat = lat
 
     @classmethod
     def from_list(cls, vec):
         return cls(vec[0], vec[1])
 
     def equals(self, point):
-        return self.x == point.x and self.y == point.y
+        return self.lng == point.lng and self.lat == point.lat
 
 
 class Point3D(object):
@@ -99,23 +99,23 @@ class Rect(object):
 
     def project(self, rect, point):
         return Point(
-            (point.x - rect.top) / rect.width * self.width + self.top,
-            (-point.y - rect.left) / rect.height * self.height + self.left)
+            (point.lng - rect.top) / rect.width * self.width + self.top,
+            (-point.lat - rect.left) / rect.height * self.height + self.left)
 
 
 class Player(object):
 
     def __init__(self, raw):
-        map_id = raw.context[7]
-        fp = get(_MAP_INFO_URL.format(map_id))
-        map_data = json.loads(fp.text)['maps'][str(map_id)]
+        zone_id = raw.context[7]
+        fp = get(_MAP_INFO_URL.format(zone_id))
+        map_data = json.loads(fp.text)['maps'][str(zone_id)]
         identity = json.loads(raw.identity)
         fp.close()
 
         self.name = identity['name']
-        self.moving = False
-        self.updated = False
-        self.map = Place(map_data['map_name'], map_id, map_data['map_rect'])
+        self.updated = True
+        self.updates = ['creation']
+        self.zone = Place(map_data['map_name'], zone_id, map_data['map_rect'])
         self.region = Place(map_data['region_name'], map_data['region_id'])
         self.continent = Place(map_data['continent_name'],
                                map_data['continent_id'],
@@ -127,31 +127,39 @@ class Player(object):
         self.update_position(raw.fAvatarPosition, raw.fAvatarFront)
         # self.direction = -(atan2(dir_z, dir_x) * 180 / pi) % 360
 
-    def reset(self):
-        self.moving = False
+        print("Player Created")
+
+    def set_update(self, update):
+        self.updates.append(update)
+        self.updated = True
+
+    def clear_updates(self):
         self.updated = False
+        self.updates = []
 
     def update_position(self, position, direction):
         dir_x = direction[0]
         dir_z = direction[2]
         pos = Point(position[0] * _MULTIPLIER, position[2] * _MULTIPLIER)
-        self.position = self.continent.rect.project(self.map.rect, pos)
+        self.position = self.continent.rect.project(self.zone.rect, pos)
         self.direction = -(atan2(dir_z, dir_x) * 180 / pi) % 360
         self.position_raw = Point3D.from_list(position)
-        self.moving = True
         self.updated = True
+        self.updates.append('position')
+
+        print("Position Updated")
 
     @property
     def json(self):
         return json.dumps({
             'name': self.name,
-            'moving': self.moving,
             'updated': self.updated,
-            'map': self.map.dict,
+            'updates': self.updates,
+            'zone': self.zone.dict,
             'region': self.region.dict,
             'continent': self.continent.dict,
             'server': self.server.dict,
-            'position': self.position.__dict__,
+            'position': [self.position.lng, self.position.lat],
             'direction': self.direction})
 
 
@@ -163,11 +171,12 @@ class Notifier(Thread):
         self.force_update = False
 
     def register(self, client):
-        self.force_update = True
         self.clients.add(client)
+        self.force_update = True
 
     def unregister(self, client):
         self.clients.remove(client)
+        self.force_update = False
 
     def run(self, ):
         player = None
@@ -175,32 +184,33 @@ class Notifier(Thread):
 
         # Only check if people are connected
         while _NOTIFIER.running:
+
             memfile.seek(0)
             data = unpack(Link, memfile.read(ctypes.sizeof(Link)))
 
             # Sleep until memory file read
             if data.context_len == 0 or not self.clients:
-                sleep(2)
+                sleep(1)
                 continue
 
             # Player instantiation or Map change
-            if not player or player.map.id != data.context[7]:
+            if not player or player.zone.id != data.context[7]:
                 player = Player(data)
-                player.updated = True
-                print("Player Updated")
 
             # Player movement
             elif not player.position_raw.equals(data.fAvatarPosition):
                 player.update_position(data.fAvatarPosition, data.fAvatarFront)
-                print("Position Updated")
+
+            if self.force_update:
+                player.set_update('connection')
+                self.force_update = False
 
             # Only send if there is an update to send
-            if player.updated or self.force_update:
+            if player.updated:
                 for client in self.clients:
                     try:
                         client.write_message(player.json)
-                        player.reset()
-                        self.force_update = False
+                        player.clear_updates()
                     except Exception as e:
                         print(e)
             sleep(0.1)
