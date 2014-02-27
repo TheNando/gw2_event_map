@@ -24,9 +24,9 @@ var MapManager = (function () {
     var nativeZoom;
 
     function initialize (options) {
-        // Setup map
         nativeZoom = options.zoom.native;
 
+        // Setup map
         _map = L.map("map", {
             minZoom: options.zoom.min
             , maxZoom: options.zoom.max
@@ -35,8 +35,7 @@ var MapManager = (function () {
             , layers: [L.tileLayer(MAP_TILES_URL, {
                 minZoom: options.zoom.min
                 , maxZoom: options.zoom.max
-                , maxNativeZoom: options.zoom.native
-            })]
+                , maxNativeZoom: options.zoom.native })]
             , attributionControl: false
             , zoomControl: false
         });
@@ -46,8 +45,9 @@ var MapManager = (function () {
         return _map.unproject([coord[0], coord[1]], nativeZoom);;
     }
 
-    function setPlayerMarker (json) {
-        var pos = unproject(json.position), dir = json.direction;
+    function setPlayerMarker (pos, dir, name) {
+        name = typeof name !== 'undefined' ? name : '';
+        pos = unproject(pos);
 
         if (!playerMarker) {
             playerMarker = L.marker(pos, {
@@ -55,8 +55,8 @@ var MapManager = (function () {
                     iconSize: [48, 48],
                     iconAnchor: [24, 24],
                     className: 'markerPlayer',
-                    html: '<img src="media/position.png">'})}).addTo(_map);
-            playerMarker._icon.title = json.name;
+                    html: '<img src="media/position.png">' })}).addTo(_map);
+            playerMarker._icon.title = name;
         } else {
             playerMarker.setLatLng(pos);
             playerMarker.update();
@@ -65,23 +65,15 @@ var MapManager = (function () {
         if (!_map.getBounds().pad(-0.2).contains(pos))
             _map.setView(pos);
 
-        var scale = (_map.getZoom() + 16) / 23;
+        if (dir !== 'undefined') {
+            var scale = (_map.getZoom() + 16) / 23;
 
-        $('.markerPlayer img').css({
-            transform:
-                'scale(' + scale + ',' + scale + ') rotate(' + dir + 'deg)'
-        });
+            $('.markerPlayer img').css({
+                transform:
+                    'scale(' + scale + ',' + scale + ') rotate(' + dir + 'deg)'
+            });
+        }
     }
-
-    /*
-    function updateCamera (pos, zoom) {
-        $scope.center.lat = pos.lat;
-        $scope.center.lng = pos.lng;
-
-        if (zoom !== 'undefined')
-            $scope.center.zoom = zoom;
-    }
-    */
 
     return {
         initialize: initialize
@@ -141,12 +133,13 @@ app.controller('MapCtrl', ['$scope', function ($scope) {
                 // On first run or new map
                 if (!MapManager.zone || MapManager.zone !== json.zone.id) {
                     MapManager.zone = json.zone.id;
-                    MapManager.setPlayerMarker(json);
+                    MapManager.setPlayerMarker(
+                        json.position, json.direction, json.name);
                     // loadMapPoints();
                     // loadEvents(event_filter);
                     // supermarker.setZIndexOffset(1000)
                 } else if (json.updates.indexOf('position') !== -1) {
-                    MapManager.setPlayerMarker(json);
+                    MapManager.setPlayerMarker(json.position, json.direction);
                 }
                 /*
 
