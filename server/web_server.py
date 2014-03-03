@@ -121,6 +121,7 @@ class Player(object):
                                map_data['continent_id'],
                                map_data['continent_rect'])
         self.server = Place(None, identity['world_id'])
+        # self.server = Place("Tarnished Coast", 1017)
         self.position_raw = Point3D.from_list(raw.fAvatarPosition)
         self.position = None
         self.direction = None
