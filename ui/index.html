@@ -26,7 +26,11 @@
                 <span class="preparation">Preparation</span>
             </div>
             <div class="event-list">
-                <div class='event' ng-repeat="(name, event) in events">{{name}}
+                <div    class='event'
+                        ng-repeat="(name, event) in events | orderBy:distance"
+                        ng-mouseenter="showEventLocation(event)"
+                        ng-mouseleave="hideEventLocation()">
+                    {{name}}
                     <span class='level'>({{event.level}})</span>
                     <div class='clear'></div>
                 </div>

@@ -43,7 +43,8 @@ var Resources = (function () {
 var MapManager = (function () {
     var _map
         , info = { zones: {}, regions: {} }
-        , zone = { continent: null, id: null, floor: null }
+        , zone = { continent: null, id: null, floor: null,
+            map_rect: null, cont_rect: null }
         , events = {}
         , server
         , nativeZoom
@@ -72,8 +73,43 @@ var MapManager = (function () {
         return _map.unproject([coord[0], coord[1]], nativeZoom);
     }
 
+    function distanceBetween (coord1, coord2) {
+        return Math.sqrt(Math.pow(coord2.lat - coord1.lat, 2) + Math.pow(coord2.lng - coord1.lng, 2));
+    }
+
+    function recalcCoords (coord) {
+        var c = zone.cont_rect, z = zone.zone_rect;
+        return unproject([
+            Math.round(c[0][0] + (c[1][0] - c[0][0]) * (coord[0] - z[0][0]) / (z[1][0] - z[0][0])),
+            Math.round(c[0][1] + (c[1][1] - c[0][1]) * (1 - (coord[1] - z[0][1]) / (z[1][1] - z[0][1])))
+        ]);
+    }
+
     function isNewZone (newZoneId) {
         return (!zone.id || zone.id !== newZoneId)
+    }
+
+    function displayEvent (event) {
+        var options = { color: '#D1632A', opacity: 0.8, fillOpacity: 0.4 };
+        var radius = Math.max(50000, event.radius * 10);
+        switch (event.shape) {
+        case "sphere":
+            markerLayers.event = L.layerGroup([
+                L.circle(event.location, radius, options)]);
+            break;
+        case "poly":
+        options.smoothFactor = 0;
+            markerLayers.event = L.layerGroup([
+                L.polygon(event.points.map(recalcCoords), options)]);
+            break;
+        }
+
+        markerLayers.event.addTo(_map);
+    }
+
+    function hideEvents () {
+        if ("event" in markerLayers)
+            markerLayers.event.clearLayers();
     }
 
     function fetchEvents () {
@@ -98,8 +134,18 @@ var MapManager = (function () {
                     events[e.name] = {
                         isGroupEvent: e.flags.indexOf("group_event") !== -1
                         , level: e.level
-                        , location: e.location
+                        , location: recalcCoords(e.location.center)
+                        , distance: distanceBetween(
+                            playerMarker.getLatLng(),
+                            recalcCoords(e.location.center))
+                        , shape: e.location.type
                     };
+
+                    if (e.location.type === "sphere")
+                        events[e.name].radius = e.location.radius;
+                    else if (e.location.type === "poly")
+                        events[e.name].points = e.location.points;
+
                     updateScope();
             });
         });
@@ -111,6 +157,8 @@ var MapManager = (function () {
             function (data) {
                 zone = {
                     continent: data.maps[zoneId].continent_id
+                    , cont_rect: data.maps[zoneId].continent_rect
+                    , zone_rect: data.maps[zoneId].map_rect
                     , id: zoneId
                     , floor: data.maps[zoneId].default_floor
                 };
@@ -253,6 +301,8 @@ var MapManager = (function () {
         , setPlayerMarker: setPlayerMarker
         , setServer: setServer
         , setZone: setZone
+        , displayEvent: displayEvent
+        , hideEvents: hideEvents
     };
 })();
 
@@ -269,6 +319,14 @@ app.controller('MapCtrl', ['$scope', function ($scope) {
         tiles: { url: MAP_TILES_URL }});
 
     $scope.events = MapManager.events;
+
+    $scope.showEventLocation = function (event) {
+        MapManager.displayEvent(event);
+    };
+
+    $scope.hideEventLocation = function (argument) {
+        MapManager.hideEvents();
+    };
 
     $scope.initialize = function () {
         var host = "localhost",
