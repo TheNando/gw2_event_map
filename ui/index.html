@@ -21,18 +21,30 @@
     </head>
     <body ng-controller="MapCtrl" ng-init="initialize()">
         <div class="events">
-            <div class="event-buttons">
-                <span class="active">Active</span>
-                <span class="preparation">Preparation</span>
+            <div class="event-controls">
+                <span ng-show="unlocked">
+                    <img src="media/position.png" style="height: 20px; width: 20px">
+                </span>
             </div>
-            <div class="event-list">
-                <div    class='event'
-                        ng-repeat="(name, event) in events | orderBy:distance"
+
+            <div    class="locked-event"
+                    ng-class="{'group-event': lockedEvent.isGroupEvent}"
+                    ng-if="lockedEvent">
+                {{lockedEvent.name}}
+                <span class="level">({{lockedEvent.level}})</span>
+            </div>
+
+            <div class="clear"></div>
+
+            <div class="event-list" ng-mouseleave="panToPlayer()">
+                <div    class="event"
+                        ng-class="{'group-event': event.isGroupEvent}"
+                        ng-repeat="event in events | orderBy: 'distance'"
                         ng-mouseenter="showEventLocation(event)"
-                        ng-mouseleave="hideEventLocation()">
-                    {{name}}
-                    <span class='level'>({{event.level}})</span>
-                    <div class='clear'></div>
+                        ng-click="lockEvent(event)">
+                    {{event.name}}
+                    <span class="level">({{event.level}})</span>
+                    <div class="clear"></div>
                 </div>
             </div>
         </div>

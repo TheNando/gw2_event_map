@@ -40,16 +40,113 @@ var Resources = (function () {
     return _resources;
 })();
 
+var EventManager = (function () {
+    var events = [];
+
+    function createEventMarker (event) {
+        var options = {
+            color: event.isGroupEvent ? '#ffc000' : '#d1632a',
+            opacity: 0.8,
+            fillOpacity: 0.4,
+            smoothFactor: 0};
+        var radius = Math.max(50000, event.radius * 10);
+
+        switch (event.shape) {
+        case "sphere":
+             return L.layerGroup([
+                L.circle(event.location, radius, options)]);
+        case "poly":
+            return L.layerGroup([
+                L.polygon(event.points.map(recalcCoords), options)]);
+        default:
+            // debugger;
+        }
+    }
+
+    function displayEvent (event) {
+        clearEvents();
+        markerLayers.event = createEventMarker(event)
+        markerLayers.event.addTo(_map);
+        _map.panTo(event.location, {animate: true});
+    }
+
+    function clearEvents () {
+        // Remove previous events
+        if ("event" in markerLayers)
+            markerLayers.event.clearLayers();
+
+        if ("lockedEvent" in markerLayers)
+            markerLayers.lockedEvent.clearLayers();
+    }
+
+    function lockEvent (event) {
+        clearEvents();
+        markerLayers.lockedEvent = createEventMarker(event);
+        markerLayers.lockedEvent.addTo(_map);
+    }
+
+    function fetchEvents () {
+         return $.getJSON(
+            EVENTS_URL.replace("{w}", server).replace("{m}", zone.id));
+    }
+
+    function loadEvents (data, textStatus, jqXHR) {
+        // for (e in events)
+        //      if (events.hasOwnProperty(e))
+        //          delete events[e];
+        while (events.length > 0)
+            events.pop();
+
+        data.events.forEach(function(evt) {
+            if (evt.state !== "Active")
+                return;
+
+            $.getJSON(
+                EVENT_DETAILS_URL
+                    .replace("{e}", evt.event_id),
+                function (details) {
+                    var e = details.events[evt.event_id];
+                    var newEvt = {
+                        name: e.name
+                        , isGroupEvent: e.flags.indexOf("group_event") !== -1
+                        , level: e.level
+                        , location: recalcCoords(e.location.center)
+                        , distance: distanceBetween(
+                            playerMarker.getLatLng(),
+                            recalcCoords(e.location.center))
+                        , shape: e.location.type
+                    };
+
+                    if (e.location.type === "sphere")
+                        newEvt.radius = e.location.radius;
+                    else if (e.location.type === "poly")
+                        newEvt.points = e.location.points;
+
+                    events.push(newEvt);
+                    updateScope();
+            });
+        });
+    }
+
+    return {
+        events: events
+        , initialize: initialize
+        , lockEvent: lockEvent
+        , displayEvent: displayEvent
+        , clearEvents: clearEvents
+    };
+})();
+
 var MapManager = (function () {
     var _map
         , info = { zones: {}, regions: {} }
         , zone = { continent: null, id: null, floor: null,
             map_rect: null, cont_rect: null }
-        , events = {}
+        , events = []
         , server
         , nativeZoom
         , markerLayers = {}
-        , playerMarker = null
+        , playerMarker
 
     function initialize (options) {
         nativeZoom = options.zoom.native;
@@ -89,27 +186,50 @@ var MapManager = (function () {
         return (!zone.id || zone.id !== newZoneId)
     }
 
-    function displayEvent (event) {
-        var options = { color: '#D1632A', opacity: 0.8, fillOpacity: 0.4 };
-        var radius = Math.max(50000, event.radius * 10);
-        switch (event.shape) {
-        case "sphere":
-            markerLayers.event = L.layerGroup([
-                L.circle(event.location, radius, options)]);
-            break;
-        case "poly":
-        options.smoothFactor = 0;
-            markerLayers.event = L.layerGroup([
-                L.polygon(event.points.map(recalcCoords), options)]);
-            break;
-        }
-
-        markerLayers.event.addTo(_map);
+    function panToPlayer () {
+        _map.panTo(playerMarker.getLatLng(), {animate: true});
     }
 
-    function hideEvents () {
+    function createEventMarker (event) {
+        var options = {
+            color: event.isGroupEvent ? '#ffc000' : '#d1632a',
+            opacity: 0.8,
+            fillOpacity: 0.4,
+            smoothFactor: 0};
+        var radius = Math.max(50000, event.radius * 10);
+
+        switch (event.shape) {
+        case "sphere":
+             return L.layerGroup([
+                L.circle(event.location, radius, options)]);
+        case "poly":
+            return L.layerGroup([
+                L.polygon(event.points.map(recalcCoords), options)]);
+        default:
+            // debugger;
+        }
+    }
+
+    function displayEvent (event) {
+        clearEvents();
+        markerLayers.event = createEventMarker(event)
+        markerLayers.event.addTo(_map);
+        _map.panTo(event.location, {animate: true});
+    }
+
+    function clearEvents () {
+        // Remove previous events
         if ("event" in markerLayers)
             markerLayers.event.clearLayers();
+
+        if ("lockedEvent" in markerLayers)
+            markerLayers.lockedEvent.clearLayers();
+    }
+
+    function lockEvent (event) {
+        clearEvents();
+        markerLayers.lockedEvent = createEventMarker(event);
+        markerLayers.lockedEvent.addTo(_map);
     }
 
     function fetchEvents () {
@@ -118,9 +238,11 @@ var MapManager = (function () {
     }
 
     function loadEvents (data, textStatus, jqXHR) {
-       for (e in events)
-            if (events.hasOwnProperty(e))
-                delete events[e];
+        // for (e in events)
+        //      if (events.hasOwnProperty(e))
+        //          delete events[e];
+        while (events.length > 0)
+            events.pop();
 
         data.events.forEach(function(evt) {
             if (evt.state !== "Active")
@@ -131,8 +253,9 @@ var MapManager = (function () {
                     .replace("{e}", evt.event_id),
                 function (details) {
                     var e = details.events[evt.event_id];
-                    events[e.name] = {
-                        isGroupEvent: e.flags.indexOf("group_event") !== -1
+                    var newEvt = {
+                        name: e.name
+                        , isGroupEvent: e.flags.indexOf("group_event") !== -1
                         , level: e.level
                         , location: recalcCoords(e.location.center)
                         , distance: distanceBetween(
@@ -142,10 +265,11 @@ var MapManager = (function () {
                     };
 
                     if (e.location.type === "sphere")
-                        events[e.name].radius = e.location.radius;
+                        newEvt.radius = e.location.radius;
                     else if (e.location.type === "poly")
-                        events[e.name].points = e.location.points;
+                        newEvt.points = e.location.points;
 
+                    events.push(newEvt);
                     updateScope();
             });
         });
@@ -296,13 +420,15 @@ var MapManager = (function () {
 
     return {
         events: events
-        , isNewZone: isNewZone
         , initialize: initialize
+        , lockEvent: lockEvent
+        , isNewZone: isNewZone
         , setPlayerMarker: setPlayerMarker
         , setServer: setServer
         , setZone: setZone
         , displayEvent: displayEvent
-        , hideEvents: hideEvents
+        , clearEvents: clearEvents
+        , panToPlayer: panToPlayer
     };
 })();
 
@@ -319,14 +445,20 @@ app.controller('MapCtrl', ['$scope', function ($scope) {
         tiles: { url: MAP_TILES_URL }});
 
     $scope.events = MapManager.events;
+    $scope.showEventLocation = MapManager.displayEvent;
 
-    $scope.showEventLocation = function (event) {
-        MapManager.displayEvent(event);
+    $scope.panToPlayer = function (argument) {
+        if (!MapManager.lockedEvent)
+            MapManager.clearEvents();
+
+        MapManager.panToPlayer();
     };
 
-    $scope.hideEventLocation = function (argument) {
-        MapManager.hideEvents();
-    };
+    $scope.lockEvent = function (event) {
+        MapManager.lockEvent(event);
+        $scope.$apply();
+        $(".event-list")[0].style.top = (80 + $(".locked-event").height()) + "px";
+    }
 
     $scope.initialize = function () {
         var host = "localhost",

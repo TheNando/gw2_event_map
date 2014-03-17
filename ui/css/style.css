@@ -38,9 +38,14 @@ body {
     background: #000;
 }
 
+.clear {
+    clear: both;
+}
+
 .events {
+    position: fixed !important;
+    position: absolute;
     padding: 10px;
-    position: fixed;
     top: 30px;
     left: 10px; 
     width: 375px;
@@ -48,37 +53,15 @@ body {
     z-index: 100;
 }
 
-.event {
-    text-shadow: 0 0 10px #000000, 0 0 10px #000000, 0 0 10px #000000, 0 0 10px #000000, 0 0 10px #000000;
-    color: rgba(255, 120, 50, 0.8);
-    margin: 10px;
-    padding: 10px;
-    padding-bottom: 20px;
-    font-size: 1.3em;
-    text-align: left;
-}
-
-.event:not(:last-child) {
-    border-bottom: 2px dotted rgba(150, 150, 150, 0.8);
-}
-
-.level {
-    text-shadow: 0 0 10px #000000, 0 0 10px #000000, 0 0 10px #000000, 0 0 10px #000000, 0 0 10px #000000;
-    color: rgba(255, 255, 255, 0.7);
-    float: right;
-}
-
-.clear {
-    clear: both;
-}
+.event-controls {}
 
 .event-list {
     position: fixed !important;
     position: absolute;
-    top: 85px;
-    bottom: 0;
     overflow-y: auto;
     width: 375px;
+    top: 30px;
+    bottom: 0;
 }
 
 .event-buttons {
@@ -100,10 +83,27 @@ body {
     color: rgba(255, 120, 50, 0.8);
 }
 
-.active {
-    border-left: 3px solid rgba(0, 255, 0, 0.4);
+.event, .locked-event {
+    text-shadow: 0 0 10px #000000, 0 0 10px #000000, 0 0 10px #000000, 0 0 10px #000000, 0 0 10px #000000;
+    color: rgba(255, 120, 50, 0.8);
+    margin: 10px;
+    padding: 10px;
+    padding-bottom: 20px;
+    font-size: 1.3em;
+    text-align: left;
+    cursor: pointer;
 }
 
-.preparation {
-    border-left: 3px solid rgba(50, 50, 200, 0.9);
+.group-event {
+    color: rgba(255, 192, 0, 0.8);
+}
+
+.event:not(:last-child) {
+    border-bottom: 2px dotted rgba(150, 150, 150, 0.8);
+}
+
+.level {
+    text-shadow: 0 0 10px #000000, 0 0 10px #000000, 0 0 10px #000000, 0 0 10px #000000, 0 0 10px #000000;
+    color: rgba(255, 255, 255, 0.7);
+    float: right;
 }
